@@ -16,7 +16,7 @@ library(tidyverse)
 library(rstatix)
 library(ggpubr)
 
-setwd("~/Documents/GitHub/Kausell_FigueroaVargas_neuroCOVID_2024/BEHAVE")
+setwd("~/Documents/GitHub/Kausell_FigueroaVargas_neuroCOVID/BEHAVE")
 
 #___________ neuroCOVID
 datafile = "COR_rl_fMRI4.txt" # PB
@@ -216,7 +216,7 @@ parameters::standardize_parameters(Mbase)
 
 
 
-Ml = lm(behavior_Shift ~ COVID + HOSPITAL + ANOSMIA + EDAD + TIEMPO + run , data=forIDXm[forIDXm$fase==1,])
+Ml = lm(behavior_Shift ~ COVID + HOSPITAL + ANOSMIA + EDAD + TIEMPO + run + EL , data=forIDXm[forIDXm$fase==1,])
 summary(Ml)
 parameters::standardize_parameters(Ml)
 #anova(Ml)
@@ -253,9 +253,12 @@ alpha_r_moda=numeric()
 alpha_a_moda=numeric()
 alpha_s_mean=numeric()
 alpha_s_median=numeric()
-for (ns in 1:96) {
+
+ID =(as.numeric(as.factor((as.numeric(as.factor(DATA_TOTAL$SU):as.factor(DATA_TOTAL$run))))))
+nsession=unique(ID)
+for (ns in 1:187) {
   # ns=1
-ID = as.numeric(as.factor(DATA_TOTAL$SU))
+#ID = as.numeric(as.factor(DATA_TOTAL$SU))
 
 #DATA_RL = DATA_TOTAL[DATA_TOTAL$COVID==0,]
 
@@ -264,12 +267,12 @@ ID = as.numeric(as.factor(DATA_TOTAL$SU))
 #DATA_RL = DATA_TOTAL[ID==ns & ((DATA_TOTAL$fase)<2 ), ]
 DATA_RL = DATA_TOTAL[ID==ns,]
 
-ID = as.numeric(as.factor(DATA_RL$SU))
+IDi = as.numeric(as.factor(DATA_RL$SU))
 
-unique(ID)
-nSUB = max(ID)
+unique(IDi)
+nSUB = max(IDi)
 #nT = which(!DATA_RL$firstT)
-#nT = length(DATA_RL$out_Bd1)
+nT = length(DATA_RL$out_Bd1)
 #DATA_RL$shift2=0
 
 
@@ -313,8 +316,8 @@ alpha_a_mean[ns] = mean(chains[,"alpha_a"])
 alpha_a_median[ns] = median(chains[,"alpha_a"])
 alpha_r_mean[ns] = mean(chains[,"alpha_r"])
 alpha_r_median[ns] = median(chains[,"alpha_r"])
-#alpha_a_moda[ns] =Wsumary[6,6]
-#alpha_r_moda[ns] =Wsumary[7,6]
+alpha_a_moda[ns] =Wsumary[6,6]
+alpha_r_moda[ns] =Wsumary[7,6]
 #alpha_s_mean[ns] = mean(chains[,"alpha_s"])
 #alpha_s_median[ns] = median(chains[,"alpha_s"])
 }
@@ -324,17 +327,24 @@ A=H
 E=H
 Ti=H
 Co=H
+EL=H
 
-ID = as.numeric(as.factor(DATA_TOTAL$SU))
+#ID = as.numeric(as.factor(DATA_TOTAL$SU))
 
-for (ns in 1:96) {
+for (ns in nsession) {
+  
   H[ns] = unique(DATA_TOTAL$HOSPITAL[ID==ns])
   A[ns] = unique(DATA_TOTAL$ANOSMIA[ID==ns])
   E[ns] = unique(DATA_TOTAL$EDAD[ID==ns])
   Ti[ns] = unique(DATA_TOTAL$TIEMPO[ID==ns])
   Co[ns] = unique(DATA_TOTAL$COVID[ID==ns])
+  EL[ns] = test_$EducationLevel[unique(DATA_TOTAL$SU[ID==ns])== test$codigo]
 }
 
+
+m.lr = lm(I(as.numeric(scale(alpha_r_median-alpha_a_median))) ~ Co + H + A + E + Ti +  EL )
+summary(m.lr)
+parameters::standardize_parameters(m.lr)
 
 
 library(rjags)
@@ -342,50 +352,55 @@ library(rjags)
 model_code <- "
 model {
   for (i in 1:N) {
-    y[i] ~ dnorm(mu[i], tau)
-    mu[i] <- b[1] + b[2]*x1[i] + b[3]*x2[i] + b[4]*x3[i] + b[5]*x4[i] + b[6]*x5[i]
+    y[i] ~ dnorm(mu[i], tau) # b[7]*x6[i]
+    #y[i] ~ dt(mu[i], tau, nu)
+    mu[i] <- b[1] + b[2]*x1[i] + b[3]*x2[i] + b[4]*x3[i] + b[5]*x4[i]  + b[6]*x5[i] + b[7]*x6[i]
   }
 
   # Prioridades
-  for (j in 1:6) {
+  for (j in 1:7) {
     b[j] ~ dnorm(0, 1e-6)
   }
 
   # Precisión de la distribución normal
   tau ~ dgamma(0.001, 0.001)
+  #tau <- pow(sigma, -2)
+  #sigma ~ dunif(0, 100)
+  nu ~ dexp(1)
 }
 "
 
 # Combinar datos en una lista
 data_list <- list(N = length(H), 
-                  y = as.numeric(scale(alpha_r_mean-alpha_a_median)), 
+                  y = as.numeric(scale(alpha_r_median-alpha_a_median)), 
                   x1 = Co, 
                   x2 = A, 
                   x3 = H, 
                   x4 = Ti, 
-                  x5 = E)
+                  x5 = E,
+                  x6 = EL)
 
 # Configuración del modelo y adaptación
-model <- jags.model(textConnection(model_code), data = data_list, n.chains = 3)
-update(model, 1000)  # Adaptación
+#model <- jags.model(textConnection(model_code), data = data_list, n.chains = 3)
+#update(model, 1000)  # Adaptación
 
 # Muestreo
-samples <- coda.samples(model, c("b", "tau","deviance"), n.iter = 5000, thin = 5)
+#samples <- coda.samples(model, c("b", "tau","deviance"), n.iter = 5000, thin = 5)
 
 # Resumen de resultados
-summary(samples)
+#summary(samples)
 
 initial_values_list <- list(
-  dump.format(list(b = rnorm(6,1,1), tau = rgamma(1, 1, 1),.RNG.name="base::Mersenne-Twister", .RNG.seed=6666 )),
-              dump.format(list(b = rnorm(6,1,1), tau = rgamma(1, 1, 1), .RNG.name="base::Wichmann-Hill", .RNG.seed=1234)),
-              dump.format(list(b = rnorm(6,1,1), tau = rgamma(1, 1, 1),  .RNG.name="base::Mersenne-Twister", .RNG.seed=6666))
+  dump.format(list(b = rnorm(7,1,1), tau = rgamma(1, 1, 1),.RNG.name="base::Mersenne-Twister", .RNG.seed=6666 )),
+              dump.format(list(b = rnorm(7,1,1), tau = rgamma(1, 1, 1), .RNG.name="base::Wichmann-Hill", .RNG.seed=1234)),
+              dump.format(list(b = rnorm(7,1,1), tau = rgamma(1, 1, 1),  .RNG.name="base::Mersenne-Twister", .RNG.seed=6666))
 )
 
 # Configuración del generador de números aleatorios para cada cadena
 parallel_info <- list(seed = c(123, 456, 789))
 # Configuración del modelo
 model <- run.jags(model_code, data = data_list, n.chains = 3, monitor = c("b", "tau","deviance"),
-                  burnin = 10000, sample=1000, thin=10,  inits = initial_values_list)
+                  burnin = 100000, sample=1000, thin=100,  inits = initial_values_list)
 
 # Resumen de resultados
 summary(model)
@@ -420,10 +435,10 @@ AA = ggplot(dataF, aes(x = PS, y = RG, fill = Color)) +
        y = "Regresors") +
   theme_minimal() +
   scale_fill_manual(values = c("lightblue", "orange")) + 
-  geom_text(data=dataF[1,],aes(x = 0.75, y = 1.5, 
+  geom_text(data=dataF[1,],aes(x = 0.6, y = 1.5, 
                               label =  paste("p=", format(mean(chains[,"b[3]"]<0), digits  = 1))),
                               color = "black", size = 4, hjust = 0) + 
-  geom_text(data=dataF[1,],aes(x = -1.75, y = 2.5, 
+  geom_text(data=dataF[1,],aes(x = -0.75, y = 2.5, 
                             label =  paste("p=", format(mean(chains[,"b[4]"]>0), digits  = 1))),
           color = "black", size = 4, hjust = 0) +
   guides(fill = "none") 
@@ -438,22 +453,23 @@ data_list <- list(N = length(forIDXm$behavior_Shift[forIDXm$fase==1]),
                   x2 = forIDXm$ANOSMIA[forIDXm$fase==1], 
                   x3 = forIDXm$HOSPITAL[forIDXm$fase==1],  
                   x4 = forIDXm$TIEMPO[forIDXm$fase==1], 
-                  x5 = forIDXm$EDAD[forIDXm$fase==1] )
+                  x5 = forIDXm$EDAD[forIDXm$fase==1],
+                  x6 = EL)
 
 # Configuración del modelo y adaptación
-model <- jags.model(textConnection(model_code), data = data_list, n.chains = 3)
-update(model, 1000)  # Adaptación
+#model <- jags.model(textConnection(model_code), data = data_list, n.chains = 3)
+#update(model, 1000)  # Adaptación
 
 # Muestreo
-samples <- coda.samples(model, c("b", "tau","deviance"), n.iter = 5000, thin = 5)
+#samples <- coda.samples(model, c("b", "tau","deviance"), n.iter = 5000, thin = 5)
 
 # Resumen de resultados
-summary(samples)
+#summary(samples)
 
 initial_values_list <- list(
-  dump.format(list(b = rnorm(6,1,1), tau = rgamma(1, 1, 1),.RNG.name="base::Mersenne-Twister", .RNG.seed=6666 )),
-  dump.format(list(b = rnorm(6,1,1), tau = rgamma(1, 1, 1), .RNG.name="base::Wichmann-Hill", .RNG.seed=1234)),
-  dump.format(list(b = rnorm(6,1,1), tau = rgamma(1, 1, 1),  .RNG.name="base::Mersenne-Twister", .RNG.seed=6666))
+  dump.format(list(b = rnorm(7,1,1), tau = rgamma(1, 1, 1),.RNG.name="base::Mersenne-Twister", .RNG.seed=6666 )),
+  dump.format(list(b = rnorm(7,1,1), tau = rgamma(1, 1, 1), .RNG.name="base::Wichmann-Hill", .RNG.seed=1234)),
+  dump.format(list(b = rnorm(7,1,1), tau = rgamma(1, 1, 1),  .RNG.name="base::Mersenne-Twister", .RNG.seed=6666))
 )
 
 
@@ -461,7 +477,7 @@ initial_values_list <- list(
 summary(model)
 # Configuración del modelo
 model2 <- run.jags(model_code, data = data_list, n.chains = 3, monitor = c("b", "tau","deviance"),
-                  burnin = 10000, sample=1000, thin=10,  inits = initial_values_list)
+                  burnin = 100000, sample=1000, thin=100,  inits = initial_values_list)
 
 # Resumen de resultados
 summary(model2)
@@ -482,6 +498,7 @@ dataF$Color <- ifelse(dataF$RG == "An", "lightblue", "orange")  # Puedes ajustar
 BB = ggplot(dataF, aes(x = PS, y = RG, fill = Color)) +
   geom_violin(trim = FALSE, alpha = 0.8, color=NA) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  #xlim(c(-1.3,1.3))+
   labs(title = "Change after a loss during shift ",
        x = "Posterior Distribution",
        y = "Regresors") +
@@ -516,100 +533,60 @@ BB+AA+plot_layout(design = layout) + plot_annotation(tag_levels = 'A')
 
 library(effectsize)
 
-test = read.table("test2.tsv",sep="\t",header = T)
-names(test)
-#[1] "covid"           "anosmia"         "Hospitalización" "Tiempo.Z"        "EDAD.Z"          "codigo"          "P9"             
-#[8] "G6"              "Aden"            "Ineco"          
+test_ = read.table("participants.txt",sep="\t",header = T)
+test_$P9 = as.numeric(test_$P9)
+test_$G7 = as.numeric(test_$G7)
 
-names(test) <- c("Co"      ,     "A"    ,   "H" ,"Ti" , "E"  , "codigo" , "P9", "G6" , "Adem" ,"Ineco", "KORc","Memory",'marcha')
+names(test_)
+names(test_)[c(1,3,5,6,8,9,11,12,14,15)] <- c("codigo","E","Co","H","G6","Adem","A","KORc","marcha","Ti")
+test_$Adem = as.numeric(test_$Adem)
+test_$Ineco = as.numeric(test_$Ineco)
 
 
-
-
-wilcox.test(E ~ Co,data=test)
-wilcox_effsize(E ~ Co,data=test)
-
-min(test$E)
-max(test$E)
-t.test(E ~ Co,data=test)
 m.E = lm(E ~ Co + A+ H ,data=test)
 summary(m.E)
 parameters::standardize_parameters(m.E)
 
-
-wilcox_effsize(Ti ~ Co,data=test)
-t.test(Ti ~ Co,data=test)
 m.Ti=lm(Ti ~ Co + A+ H ,data=test)
 summary(m.Ti)
 parameters::standardize_parameters(m.Ti)
 
-wilcox.test(P9 ~ Co,data=test)
-t.test(P9 ~ Co,data=test)
-m.p9=lm(P9 ~ Co + A+ H +E   + Ti ,data=test)
+m.education = lm(EducationLevel ~ Co + A+ H ,data=test_)
+summary(m.education)
+parameters::standardize_parameters(m.education)
+
+m.p9=lm(P9 ~ Co + A+ H +E   + Ti ,data=test_)
 summary(m.p9)
 parameters::standardize_parameters(m.p9)
 
-
-wilcox.test(G6 ~ Co,data=test)
-t.test(G6 ~ Co,data=test)
-m.g6=lm(G6 ~ Co + A+ H +E   + Ti ,data=test)
+m.g6=lm(G6 ~ Co + A+ H +E   + Ti ,data=test_)
 summary(m.g6)
 parameters::standardize_parameters(m.g6)
 
-wilcox.test(Adem ~ Co,data=test)
 
-t.test(Adem ~ Co,data=test)
-m.adem=lm(Adem ~ Co + A+ H +E   + Ti ,data=test)
+#### ---------------   new 
+m.adem=lm(Adem ~ Co + A+ H +E   + Ti + EducationLevel ,data=test_)
 summary(m.adem)
 parameters::standardize_parameters(m.adem)
 
-wilcox.test(KORc ~ A,data=test)
-wilcox_effsize(KORc ~ A,data=test)
-
-
-test$KOR4 = as.numeric(test$KORc<4)
-sum(test$KOR4[!is.na(test$KOR4)])
-sum(test$A[!is.na(test$KOR4)])
-wilcox.test(KOR4 ~ A,data=test)
-wilcox_effsize(KOR4 ~ A,data=test)
-#wilcox.test(KOR4 ~ Co,data=test)
-#wilcox_effsize(KOR4 ~ Co,data=test)
-
-
-
-m.KOR=lm(I(scale(KORc)) ~ Co + A+ H +E   + Ti  ,data=test)
+m.KOR=lm(I(scale(KORc)) ~ Co + A+ H +E   + Ti  ,data=test_)
 summary(m.KOR)
 parameters::standardize_parameters(m.KOR)
 
-wilcox.test( KORc~ A,data=test)
-wilcox_effsize(KORc ~ A,data=test)
-m.KOR=lm(KORc ~Co+ A+  H +E   + Ti ,data=test)
-summary(m.KOR)
 
-
-wilcox.test( marcha~ A,data=test)
-wilcox_effsize(marcha ~ A,data=test)
-m.marcha=lm(marcha ~Co+ A+  H +E   + Ti ,data=test)
+m.marcha=lm(marcha ~Co+ A+  H +E   + Ti ,data=test_)
 summary(m.marcha)
+parameters::standardize_parameters(m.marcha)
 
-wilcox.test( Memory~ A,data=test)
-wilcox_effsize(Memory ~ A,data=test)
-m.memory=lm(Memory~ Co+ A+  H +E   + Ti,data=test)
+m.memory=lm(Memory~ Co+ A+  H +E   + Ti,data=test_)
 summary(m.memory)
 parameters::standardize_parameters(m.memory)
 
+#### ---------------   new 
 
-wilcox.test(Ineco~ Co,data=test)
-t.test(Ineco ~ Co,data=test)
-m.ineco=lm(Ineco~ Co + A+ H +E   + Ti ,data=test)
+m.ineco=lm(Ineco~ Co + A+ H +E+ Ti + EducationLevel ,data=test_)
 summary(m.ineco)
 parameters::standardize_parameters(m.ineco)
 
-
-
-
-
-summary(lm(E~ Co + A+ H   ,data=test))
-summary(lm(Ti~ Co + A+ H   ,data=test))
 
 
